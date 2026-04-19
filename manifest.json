@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "LSTSIM Telemetry",
+  "description": "Collect data from lstsim.de",
+  "version": "1.0",
+  "content_scripts": [
+    {
+      "matches": ["*://lstsim.de/*"],
+      "js": ["telemetry.js"]
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": true
+  },
+  "icons": {
+    "16": "imgs/icon16.png",
+    "48": "imgs/icon48.png",
+    "128":"imgs/icon128.png"
+  },
+  "permissions": [
+  "storage",
+  "activeTab",
+  "tabs"
+  ],
+  "host_permissions": [
+    "*://lstsim.de/*"
+  ]
+}
