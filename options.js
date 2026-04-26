@@ -14,56 +14,32 @@ function exportDataToFile(data) {
   URL.revokeObjectURL(url);
 }
 
-document.getElementById("export-data").addEventListener("click", () => {
-  browser.storage.local.get("logs").then((res) => {
-    exportDataToFile(res.logs || []);
-  });
-});
 document.getElementById("export-clear").addEventListener("click", () => {
   browser.storage.local.get("logs").then((res) => {
     const data = res.logs || [];
-
     exportDataToFile(data);
-
     browser.storage.local.set({ logs: [] });
   });
 });
 
-
 function onError(error) {
   console.log(error)
 }
-function setItem() {
-  console.log("ok")
-}
 
 function loadOptions(item) {
-  if (item && item.idobject && item.idobject.id) {
-    document.querySelector("#managed-id").innerText = item.idobject.id;
-  } else {
-    document.querySelector("#managed-id").innerText = "not set";
+  if (item && item.username) {
+    document.querySelector("#id").value = item.username; // prefill input
   }
 }
 
-function saveOptions(e) {
-    let idobject = {
-        id: document.querySelector("#id").value
-    }
-    browser.storage.local.set({idobject}).then(setItem, onError);
-    e.preventDefault();
+function restoreOptions() {
+  //browser.storage.local.get("idobject").then(loadOptions, onError);
+  getStorage(["idobject", "username", "loggingActive"])
+  .then((res) => {
+    loadOptions(res); // keeps your existing logic
+  })
+  .catch(onError);
 }
 
-function restoreOptions() {
-    browser.storage.local.get("idobject").then(loadOptions, onError);
-}
-function changeId(changes, area){
-    alert(area);
-    let changedItems = Object.keys(changes);
-    for (let item of changedItems) {
-        alert(item);
-        alert(changes[item].newValue);
-    }
-}
-browser.storage.onChanged.addListener(changeId);
 document.addEventListener('DOMContentLoaded', restoreOptions);
-document.querySelector("form").addEventListener("submit", saveOptions);
+

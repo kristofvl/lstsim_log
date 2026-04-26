@@ -1,10 +1,40 @@
 const browser = window.browser || window.chrome;
 
-let uniqueKey = null;
+let loggingActive = false;
+let username = null;
+
+// catch submit event to start the game:
+document.addEventListener("submit", (e) => {
+  const form = e.target;
+  // optional: narrow it down to the correct form
+  // e.g. if (form.id !== "loginForm") return;
+  const input = form.querySelector("input[name='playername'], #playername");
+  if (input && input.value.trim()) {
+    username = input.value.trim();
+    console.log("User submitted:", username);
+    saveData({uname: username})
+    loggingActive = true; updateStatusIndicator();
+    browser.storage.local.set({ username, loggingActive: true });
+  }
+});
+
+//old: getStorage("idobject").then(loadOptions).catch(onError);
+
+getStorage(["idobject", "username", "loggingActive"])
+  .then((res) => {
+    loadOptions(res); // keeps your existing logic
+    if (res.loggingActive && res.username) {
+      loggingActive = true; updateStatusIndicator();
+      username = res.username;
+      console.log("Restored logging for user:", username);
+    }
+  })
+  .catch(onError);
 
 const saveQueue = [];
 let flushTimer = null;
 function flushSaveQueue() {
+  if (!loggingActive) return;  // block logging until user starts game
   const batch = saveQueue.splice(0, saveQueue.length);
   flushTimer = null;
   if (batch.length === 0) return;
@@ -15,7 +45,9 @@ function flushSaveQueue() {
     });
   });
 }
+
 function saveData(d) {
+  if (!loggingActive) return;  // block logging until user starts game
   console.log(d); // temporary fix
   saveQueue.push(d);
   if (!flushTimer) {
@@ -25,12 +57,12 @@ function saveData(d) {
 
 function loadOptions(item) {
   if (item && item.idobject && item.idobject.id) {
-    uniqueKey = item.idobject.id;
+    username = item.idobject.id;
   } else {
-    const fallback = "default-" + crypto.randomUUID();
-    uniqueKey = fallback;
-    browser.storage.local.set({ idobject: { id: fallback } });
-    console.warn("No idobject found, using fallback:", fallback);
+    //const fallback = "default-" + crypto.randomUUID();
+    //username = fallback;
+    //browser.storage.local.set({ idobject: { id: fallback } });
+    //console.log("No idobject found, using fallback:", fallback);
   }
 }
 
@@ -50,7 +82,6 @@ function getStorage(key) {
   });
 }
 
-getStorage("idobject").then(loadOptions).catch(onError);
 
 
 /* ------------------ Aggregate Mouse and Key Statistics ---------------------- */
@@ -61,9 +92,11 @@ let mouseStats = {
   lastY: null
 };
 document.addEventListener("mousedown", () => {
+  if (!loggingActive) return;  // block logging until user starts game
   mouseStats.clicks++;
 });
 document.addEventListener("mousemove", (event) => {
+  if (!loggingActive) return;  // block logging until user starts game
   if (mouseStats.lastX !== null) {
     const dx = event.clientX - mouseStats.lastX;
     const dy = event.clientY - mouseStats.lastY;
@@ -74,16 +107,18 @@ document.addEventListener("mousemove", (event) => {
   mouseStats.lastY = event.clientY;
 });
 setInterval(() => {
+  if (!loggingActive) return;  // block logging until user starts game
   if (mouseStats.clicks === 0 && mouseStats.moveDistance === 0) return;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: uniqueKey, type: "mouse", 
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: username, type: "mouse", 
          clicks: mouseStats.clicks, moveDistance: Math.floor(mouseStats.moveDistance) });
   // reset after saving
   mouseStats.clicks = 0; mouseStats.moveDistance = 0;
 }, 5000);
 
 document.addEventListener("keydown", (e) => {
+  if (!loggingActive) return;  // block logging until user starts game
   saveData({
-    id: uniqueKey,
+    id: username,
     type: "key", key: e.key,
     code: e.code,
     timestamp: new Date().toTimeString().split(" ")[0]
@@ -98,6 +133,7 @@ document.addEventListener("keydown", (e) => {
 const processedMissions = new WeakSet();
 
 function extractMission(root, type) {
+  if (!loggingActive) return;  // block logging until user starts game
   try {
     // mission text (more robust than style matching)
     let missiontext = "";
@@ -119,14 +155,11 @@ function extractMission(root, type) {
       if (txt.includes("RTW")) forcesdict.RTW++;
       if (txt.includes("KTW")) forcesdict.KTW++;
     });
-
-/*<div class="patient_row">       <div class="status_row status_2">         <div class="status">2</div>     </div>   <span class="log_car_type log_car_type_ktw car_name" style="" data-car="2182">13/85-1</span>    </div>*/
-
     // clock
     const clock = document.querySelector("#clock")?.textContent || "";
     // mission type label
     const missiontype = root.querySelector(".type")?.textContent || "";
-    return {  timestamp: new Date().toTimeString().split(" ")[0], id: uniqueKey, 
+    return {  timestamp: new Date().toTimeString().split(" ")[0], id: username, 
               type, missiontext, assigned_cars: car_list, 
               requested_forces: forcesdict, ingame_time: clock, mission_type: missiontype };
   } catch (e) {
@@ -136,6 +169,7 @@ function extractMission(root, type) {
 }
 
 const missionObserver = new MutationObserver((mutations) => {
+  if (!loggingActive) return;  // block logging until user starts game
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== 1) continue;
@@ -158,7 +192,6 @@ const missionObserver = new MutationObserver((mutations) => {
     }
   }
 });
-
 function startObserver() {
   const container = document.querySelector("#missionlist");
   if (!container) {
@@ -171,7 +204,6 @@ function startObserver() {
   });
   console.log("Mission observer started");
 }
-
 startObserver();
 
 
@@ -183,6 +215,7 @@ startObserver();
 const processedLogs = new WeakSet();
 
 function parseLogEntry(node) {
+  if (!loggingActive) return;  // block logging until user starts game
   try {
     // avoid re-processing
     if (processedLogs.has(node)) return null;
@@ -194,7 +227,7 @@ function parseLogEntry(node) {
     if (text.includes("Sprechaufforderung")) {
       const carEl = node.querySelector("[data-car]");
       return {  timestamp: new Date().toTimeString().split(" ")[0], 
-        id: uniqueKey, type: "call_request", time,
+        id: username, type: "call_request", time,
         caller: {
           carid: carEl?.getAttribute("data-car") || "",
           carname: carEl?.textContent || ""
@@ -204,7 +237,7 @@ function parseLogEntry(node) {
     ////////  CASE 2: verstanden. //////////////////////////////////
     if (text.toLowerCase().includes("verstanden")) {
       const message = node.querySelector("div")?.innerText || text;
-      return { id: uniqueKey, type: "acknowledgement", time, message };
+      return { id: username, type: "acknowledgement", time, message };
     }
     return null;
   } catch (e) {
@@ -214,6 +247,7 @@ function parseLogEntry(node) {
 }
 
 const interactionObserver = new MutationObserver((mutations) => {
+  if (!loggingActive) return;  // block logging until user starts game
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== 1) continue; // only elements
@@ -228,7 +262,6 @@ const interactionObserver = new MutationObserver((mutations) => {
     }
   }
 });
-
 function startInteractionObserver() {
   const container = document.querySelector("#logpanel .logcontainer");
   if (!container) {
@@ -241,7 +274,6 @@ function startInteractionObserver() {
   });
   console.log("Interaction observer started");
 }
-
 startInteractionObserver();
 
 
@@ -256,7 +288,7 @@ document.addEventListener("click", (e) => {
   // fallback-safe extraction
   const time = entry?.querySelector(".time")?.textContent?.trim() || null;
   const message = entry?.querySelector(".text")?.textContent?.trim() || "";
-  let action = "unknown";
+  let action = "unknown";  
   if (btn.closest(".logitem")) {
     const text = btn.textContent.trim().toLowerCase();
     if (text.includes("gegennehmen")) action = "phone_accept";
@@ -268,11 +300,12 @@ document.addEventListener("click", (e) => {
     action = "mission_create_and_alarm";
   }
   saveData({ timestamp: new Date().toTimeString().split(" ")[0], ingame_time: time, 
-    id: uniqueKey,
+    id: username,
     action,    
     message
   });
 });
+
 
 
 /* ---------------------------------------------------------------------------------------
@@ -295,14 +328,8 @@ function buildMissionSnapshot() {
   return { einsaetze: rtw, krankentransport: ktw, vorbestellungen: vor };
 }
 
-const missionsObserver = new MutationObserver(() => { missionDirty = true; });
-
-missionsObserver.observe(document.querySelector("#missionlist"), {
-  childList: true,
-  subtree: true
-});
-
 setInterval(() => {
+  if (!loggingActive) return;  // block logging until user starts game
   if (!missionDirty) return;
   missionDirty = false;
   const snapshot = buildMissionSnapshot();
@@ -310,7 +337,65 @@ setInterval(() => {
   const changed = JSON.stringify(snapshot) !== JSON.stringify(lastSnapshot);
   if (!changed) return;
   lastSnapshot = snapshot;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: uniqueKey, 
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: username, 
              type: "mission_overview", data: snapshot });
 }, 10000);  // every 10 secs
+
+
+/* ---------------------------------------------------------------------------------------
+   NICE DEBUGGING
+------------------------------------------------------------------------------------------ */
+
+function createStatusIndicator() {
+  const el = document.createElement("div");
+  el.id = "logging-status-indicator";
+  Object.assign(el.style, {
+    position: "fixed",
+    top: "2px",
+    right: "10px",
+    zIndex: 9999,
+    background: "rgba(0,0,0,0.7)",
+    color: "#fff",
+    padding: "2px 4px",
+    borderRadius: "3px",
+    fontSize: "8px",
+    cursor: "pointer",    // clickable    
+    fontFamily: "monospace"
+  });
+  el.textContent = "Logging: OFF";
+  el.addEventListener("click", () => {
+    loggingActive = !loggingActive;
+    browser.storage.local.set({
+      loggingActive
+    });
+    updateStatusIndicator();
+  });
+  document.body.appendChild(el);
+}
+
+createStatusIndicator();
+
+function updateStatusIndicator() {
+  const el = document.getElementById("logging-status-indicator");
+  if (!el) return;
+  el.textContent = loggingActive
+    ? `Logging: ON (${username || "unknown"})`
+    : "Logging: OFF";
+  el.style.background = loggingActive
+    ? "rgba(0,128,0,0.8)"
+    : "rgba(128,0,0,0.8)";
+}
+updateStatusIndicator();
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.loggingActive) {
+    loggingActive = changes.loggingActive.newValue;
+  }
+  if (changes.username) {
+    username = changes.username.newValue;
+  }
+  updateStatusIndicator();
+});
+
 
