@@ -2,31 +2,33 @@ const browser = window.browser || window.chrome;
 
 let loggingActive = false;
 let username = null;
+let userid = 0;
 
 // catch submit event to start the game:
 document.addEventListener("submit", (e) => {
   const form = e.target;
-  // optional: narrow it down to the correct form
-  // e.g. if (form.id !== "loginForm") return;
   const input = form.querySelector("input[name='playername'], #playername");
   if (input && input.value.trim()) {
     username = input.value.trim();
+    userid = userid || 0; userid = userid + 1;
     console.log("User submitted:", username);
-    saveData({uname: username})
+    saveData({uname: username, uid: userid});
     loggingActive = true; updateStatusIndicator();
-    browser.storage.local.set({ username, loggingActive: true });
+    browser.storage.local.set({ username, userid, loggingActive: true });
   }
 });
 
 //old: getStorage("idobject").then(loadOptions).catch(onError);
 
-getStorage(["idobject", "username", "loggingActive"])
+getStorage(["idobject", "username", "userid", "loggingActive"])
   .then((res) => {
     loadOptions(res); // keeps your existing logic
     if (res.loggingActive && res.username) {
       loggingActive = true; updateStatusIndicator();
       username = res.username;
-      console.log("Restored logging for user:", username);
+      userid = res.userid;
+      console.log("Restored logging for user:", username, " (", userid, ")");
+      updateStatusIndicator();
     }
   })
   .catch(onError);
@@ -66,9 +68,7 @@ function loadOptions(item) {
   }
 }
 
-function onError(error) {
-  console.error("Storage error:", error);
-}
+function onError(error) { console.error("Storage error:", error); }
 
 function getStorage(key) {
   return new Promise((resolve, reject) => {
@@ -83,8 +83,9 @@ function getStorage(key) {
 }
 
 
-
-/* ------------------ Aggregate Mouse and Key Statistics ---------------------- */
+/* ---------------------------------------------------------------------------------------
+   Aggregate Mouse and Key Statistics
+------------------------------------------------------------------------------------------ */
 let mouseStats = {
   clicks: 0,
   moveDistance: 0,
@@ -100,7 +101,6 @@ document.addEventListener("mousemove", (event) => {
   if (mouseStats.lastX !== null) {
     const dx = event.clientX - mouseStats.lastX;
     const dy = event.clientY - mouseStats.lastY;
-
     mouseStats.moveDistance += Math.sqrt(dx * dx + dy * dy);
   }
   mouseStats.lastX = event.clientX;
@@ -109,7 +109,7 @@ document.addEventListener("mousemove", (event) => {
 setInterval(() => {
   if (!loggingActive) return;  // block logging until user starts game
   if (mouseStats.clicks === 0 && mouseStats.moveDistance === 0) return;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: username, type: "mouse", 
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, type: "mouse", 
          clicks: mouseStats.clicks, moveDistance: Math.floor(mouseStats.moveDistance) });
   // reset after saving
   mouseStats.clicks = 0; mouseStats.moveDistance = 0;
@@ -117,11 +117,8 @@ setInterval(() => {
 
 document.addEventListener("keydown", (e) => {
   if (!loggingActive) return;  // block logging until user starts game
-  saveData({
-    id: username,
-    type: "key", key: e.key,
-    code: e.code,
-    timestamp: new Date().toTimeString().split(" ")[0]
+  saveData({ id: userid, type: "key", key: e.key,
+    code: e.code, timestamp: new Date().toTimeString().split(" ")[0]
   });
 });
 
@@ -159,7 +156,7 @@ function extractMission(root, type) {
     const clock = document.querySelector("#clock")?.textContent || "";
     // mission type label
     const missiontype = root.querySelector(".type")?.textContent || "";
-    return {  timestamp: new Date().toTimeString().split(" ")[0], id: username, 
+    return {  timestamp: new Date().toTimeString().split(" ")[0], id: userid, 
               type, missiontext, assigned_cars: car_list, 
               requested_forces: forcesdict, ingame_time: clock, mission_type: missiontype };
   } catch (e) {
@@ -207,7 +204,6 @@ function startObserver() {
 startObserver();
 
 
-
 /* ---------------------------------------------------------------------------------------
    INTERACTION OBSERVER
 ------------------------------------------------------------------------------------------ */
@@ -227,7 +223,7 @@ function parseLogEntry(node) {
     if (text.includes("Sprechaufforderung")) {
       const carEl = node.querySelector("[data-car]");
       return {  timestamp: new Date().toTimeString().split(" ")[0], 
-        id: username, type: "call_request", time,
+        id: userid, type: "call_request", time,
         caller: {
           carid: carEl?.getAttribute("data-car") || "",
           carname: carEl?.textContent || ""
@@ -237,7 +233,7 @@ function parseLogEntry(node) {
     ////////  CASE 2: verstanden. //////////////////////////////////
     if (text.toLowerCase().includes("verstanden")) {
       const message = node.querySelector("div")?.innerText || text;
-      return { id: username, type: "acknowledgement", time, message };
+      return { id: userid, type: "acknowledgement", time, message };
     }
     return null;
   } catch (e) {
@@ -300,10 +296,7 @@ document.addEventListener("click", (e) => {
     action = "mission_create_and_alarm";
   }
   saveData({ timestamp: new Date().toTimeString().split(" ")[0], ingame_time: time, 
-    id: username,
-    action,    
-    message
-  });
+    id: userid, action, message});
 });
 
 
@@ -337,7 +330,7 @@ setInterval(() => {
   const changed = JSON.stringify(snapshot) !== JSON.stringify(lastSnapshot);
   if (!changed) return;
   lastSnapshot = snapshot;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: username, 
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, 
              type: "mission_overview", data: snapshot });
 }, 10000);  // every 10 secs
 
@@ -351,8 +344,8 @@ function createStatusIndicator() {
   el.id = "logging-status-indicator";
   Object.assign(el.style, {
     position: "fixed",
-    top: "2px",
-    right: "10px",
+    top: "1px",
+    right: "2px",
     zIndex: 9999,
     background: "rgba(0,0,0,0.7)",
     color: "#fff",
@@ -379,22 +372,16 @@ function updateStatusIndicator() {
   const el = document.getElementById("logging-status-indicator");
   if (!el) return;
   el.textContent = loggingActive
-    ? `Logging: ON (${username || "unknown"})`
+    ? `Logging: ON (${username || "unknown"},${userid || "00"})`
     : "Logging: OFF";
-  el.style.background = loggingActive
-    ? "rgba(0,128,0,0.8)"
-    : "rgba(128,0,0,0.8)";
+  el.style.background = loggingActive ? "rgba(0,128,0,0.8)" : "rgba(128,0,0,0.8)";
 }
 updateStatusIndicator();
 
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.loggingActive) {
-    loggingActive = changes.loggingActive.newValue;
-  }
-  if (changes.username) {
-    username = changes.username.newValue;
-  }
+  if (changes.loggingActive) { loggingActive = changes.loggingActive.newValue; }
+  if (changes.username) { username = changes.username.newValue; }
   updateStatusIndicator();
 });
 
