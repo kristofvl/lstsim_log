@@ -9,13 +9,28 @@
 
 <style>
   body { font-family: Arial, sans-serif; margin: 20px; }
-  #chart { width: 100%; height: 600px; }
-  .toolbar { margin-bottom: 15px; }
+  #chart { width: 100%; height: 600px;}
+  .toolbar { margin-bottom: 15px;}
+  #tooltip {
+    position: absolute;
+    display: none;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 6px;
+    max-width: 450px;
+    font-size: 14px;
+    line-height: 1.4;
+    pointer-events: none;
+    z-index: 1000;
+    white-space: normal;
+  }
 </style>
 </head>
+
 <body>
 
-<h2>LSTSim Telemetry Viewer</h2>
+<h2>LSTSim Log Viewer</h2>
 
 <div class="toolbar">
   <input type="file" id="fileInput" accept=".json">
@@ -23,13 +38,29 @@
 
 <div id="chart"></div>
 
+<div id="tooltip"></div>
+
 <script>
+
 const fileInput = document.getElementById("fileInput");
+const tooltip = document.getElementById("tooltip");
 
 function parseTime(ts) {
   const [h, m, s] = ts.split(":").map(Number);
-  return (h * 3600 + m * 60 + s); // seconds since midnight, simpler & stable  
+  return h * 3600 + m * 60 + s;
 }
+
+function isMission(entry) {
+  return (
+    entry.action === "unknown" &&
+    typeof entry.ingame_time === "string" &&
+    entry.ingame_time.includes(":") &&
+    typeof entry.message === "string" &&
+    entry.message.trim().length > 10
+  );
+}
+
+function isAlarm(entry) { return entry.action?.includes("alarm"); }
 
 fileInput.addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -40,69 +71,149 @@ fileInput.addEventListener("change", async (e) => {
 });
 
 function render(logs) {
-  //logs.sort((a, b) => parseTime(a.timestamp) - parseTime(b.timestamp));
+  logs.sort((a, b) =>
+    parseTime(a.timestamp) - parseTime(b.timestamp)
+  );
   const xs = [];
   const mouseMove = [];
   const mouseClicks = [];
-  const missions = [];
   const keypresses = [];
+  const missions = [];
   const alarmEvents = [];
-  
+  // Store mission metadata by chart index
+  const missionMeta = {};
+  // parse log entries:
   for (const entry of logs) {
     const t = parseTime(entry.timestamp);
-    alarmEvents.push(entry.type === "mission_create_and_alarm" ? 1 : null);
-    keypresses.push(entry.type === "key" ? 1 : null);
-    if (entry.type === "mouse") {
-      xs.push(t);
-      mouseMove.push(entry.moveDistance || null);
-      mouseClicks.push(entry.clicks || null);
-    } 
-    missions.push(entry.action === "mission" ? 1 : null);
+    xs.push(t);
+    // Mouse movement
+    mouseMove.push( entry.type === "mouse" ? (entry.moveDistance || 0) : null );
+    // Mouse clicks
+    mouseClicks.push( entry.type === "mouse" ? (entry.clicks || null) : null );
+    // Key presses
+    keypresses.push( entry.type === "key" ? 0 : null );
+    // Missions
+    const missionDetected = isMission(entry);
+    missions.push(  missionDetected ? 7 : null );
+    // Save full mission metadata
+    if (missionDetected) {
+      const idx = xs.length - 1;
+      missionMeta[idx] = {
+        timestamp: entry.timestamp,
+        ingame_time: entry.ingame_time,
+        message: entry.message
+      };
+    }
+    // Alarm events
+    alarmEvents.push( isAlarm(entry) ? 7 : null );
   }
-  
-  document.getElementById("chart").innerHTML = "";
 
-  new uPlot({
-    title: "LSTSim Telemetry Events Over Time",
-    width: window.innerWidth - 50, height: 600,
-    scales: { x: {time: false}, y: {auto: true}, events: {time: false}, },
-    axes: [
-      { label: "Time",
-        values: (u, vals) => vals.map(v => {
-         const h = String(Math.floor(v / 3600)).padStart(2, "0");
-         const m = String(Math.floor((v % 3600) / 60)).padStart(2, "0");
-         const s = String(v % 60).padStart(2, "0");
-         return `${h}:${m}:${s}`; }), },
-      { label: "Distance" },
-      { scale: "Events", side: 1, label: "Events" }
+  document.getElementById("chart").innerHTML = "";
+  new uPlot(
+    {
+      title: "LSTSim Log Events Over Time",
+      width: window.innerWidth - 50,
+      height: 600,
+      scales: {
+        x: { time: false },
+        y: { auto: true },
+        events: { auto: false, range: [0, 7] }
+      },
+      axes: [
+        {
+          label: "Time",
+          values: (u, vals) => vals.map(v => {
+            const h = String(Math.floor(v / 3600)).padStart(2, "0");
+            const m = String(Math.floor((v % 3600) / 60)).padStart(2, "0");
+            const s = String(v % 60).padStart(2, "0");
+            return `${h}:${m}:${s}`;
+          })
+        },
+        { label: "Mouse Motion"},
+        { scale: "events", side: 1, label: "Events",
+          values: () => [ "", "Key", "Mission", "Alarm" ]
+        }
+      ],
+
+      series: [
+        // X axis
+        {},
+        {
+          label: "Mouse Motion",
+          stroke: "blue",
+          width: 2,
+          spanGaps: true,
+          points: { show: false }
+        },
+        {
+          label: "Mouse Clicks",
+          stroke: "steelblue",
+          fill: "rgba(70,130,180,0.45)",
+          scale: "events",
+          paths: uPlot.paths.bars({
+            size: [0.1, 12]
+          })
+        },
+        { label: "Key Presses",
+          stroke: "green",
+          width: 0, scale: "events",
+          points: { show: true, size:7, width:2 }
+        },
+        {
+          label: "Missions",
+          stroke: "orange",
+          width: 0, scale: "events",
+          points: { show: true, size: 12, width:4 }
+        },
+        {
+          label: "Alarm Events",
+          stroke: "red",
+          width: 0, scale: "events",
+          points: { show: true, size: 12, width:4 }
+        }
+      ],
+      hooks: {
+        setCursor: [
+          (u) => {
+            const idx = u.cursor.idx;
+            if (idx == null) {
+              tooltip.style.display = "none";
+              return;
+            }
+            // Only show tooltip on mission points
+            if (missions[idx] == null) {
+              tooltip.style.display = "none";
+              return;
+            }
+            const mission = missionMeta[idx];
+            if (!mission) {
+              tooltip.style.display = "none";
+              return;
+            }
+            tooltip.innerHTML = `
+              <b>Mission Event</b> (
+              <b>time:</b> ${mission.timestamp}, 
+              <b>ingame:</b> ${mission.ingame_time} )<br>
+              ${mission.message}`;
+            tooltip.style.display = "block";
+            tooltip.style.left = (u.cursor.left+20) + "px";
+            tooltip.style.top = (u.cursor.top+70) + "px";
+          }
+        ]
+      }
+    },
+    [
+      xs,
+      mouseMove,
+      mouseClicks,
+      keypresses,
+      missions,
+      alarmEvents
     ],
-    series: [
-      {},
-      { label: "Mouse Distance",
-        stroke: "blue", spanGaps: true,
-        points: { show: true } },
-      { label: "Mouse Clicks",
-        stroke: "cyan",
-        fill: "rgba(0,255,255,0.3)",
-        scale: "Events",
-        paths: uPlot.paths.bars(), },
-      { label: "Key Presses",
-        stroke: "green",
-        fill: "rgba(0,255,0,0.3)",
-        scale: "Events",
-        paths: uPlot.paths.bars(), },
-      { label: "Missions",
-        stroke: "orange" },
-      { label: "Alarm Events",
-        stroke: "red",
-        fill: "rgba(255,0,0,0.7)",
-        scale: "Events",
-        paths: uPlot.paths.bars(),}
-    ]
-  },
-    [ xs, mouseMove, mouseClicks, keypresses, missions, alarmEvents ], 
-    document.getElementById("chart"));
+    document.getElementById("chart")
+  );
 }
+
 </script>
 
 </body>
