@@ -71,9 +71,16 @@ fileInput.addEventListener("change", async (e) => {
 });
 
 function render(logs) {
+  // Find highest/latest ID
+  const latestId = Math.max(
+    ...logs.map(e => e.id || 0)
+  );
+  // Keep only entries from latest ID
+  logs = logs.filter(e => e.id === latestId);
   logs.sort((a, b) =>
     parseTime(a.timestamp) - parseTime(b.timestamp)
   );
+
   const xs = [];
   const mouseMove = [];
   const mouseClicks = [];
