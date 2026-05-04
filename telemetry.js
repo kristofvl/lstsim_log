@@ -18,9 +18,21 @@ document.addEventListener("submit", (e) => {
   }
 });
 
+function getStorage(key) {
+  return new Promise((resolve, reject) => {
+    browser.storage.local.get(key, (result) => {
+      if (browser.runtime.lastError) {
+        reject(browser.runtime.lastError);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
 getStorage(["username", "userid", "loggingActive"])
   .then((res) => {
-    loadOptions(res); // keeps your existing logic
+    loadOptions(res); // keeps existing username, userid, loggingActive
     if (res.loggingActive && res.username) {
       loggingActive = true; updateStatusIndicator();
       username = res.username;
@@ -28,8 +40,11 @@ getStorage(["username", "userid", "loggingActive"])
       console.log("Restored logging for user:", username, " (", userid, ")");
       updateStatusIndicator();
     }
-  })
-  .catch(onError);
+    if (document.getElementById("gradient") == null) {
+      loggingActive = false;
+      updateStatusIndicator();
+    } else { console.log("on game page: let's play"); }
+  }).catch(onError);
 
 const saveQueue = [];
 let flushTimer = null;
@@ -64,18 +79,6 @@ function loadOptions(item) {
 
 function onError(error) { console.error("Storage error:", error); }
 
-function getStorage(key) {
-  return new Promise((resolve, reject) => {
-    browser.storage.local.get(key, (result) => {
-      if (browser.runtime.lastError) {
-        reject(browser.runtime.lastError);
-      } else {
-        resolve(result);
-      }
-    });
-  });
-}
-
 
 /* ---------------------------------------------------------------------------------------
    Aggregate Mouse and Key Statistics
@@ -102,7 +105,6 @@ document.addEventListener("mousemove", (event) => {
 });
 setInterval(() => {
   if (!loggingActive) return;  // block logging until user starts game
-  //if (mouseStats.clicks === 0 && mouseStats.moveDistance === 0) return;
   saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, type: "mouse",
          clicks: mouseStats.clicks, moveDistance: Math.floor(mouseStats.moveDistance) });
   // reset after saving
@@ -151,7 +153,7 @@ function extractMission(root, type) {
     // mission type label
     const missiontype = root.querySelector(".type")?.textContent || "";
     return {  timestamp: new Date().toTimeString().split(" ")[0], id: userid,
-              /*type,*/ missiontext, cars: car_list,
+              /*type,*/ missiontext, cars: car_list, /*
               requested_forces: forcesdict, */ ingame_time: clock, mission_type: missiontype };
   } catch (e) {
     console.warn("Failed to parse mission:", e);
@@ -349,9 +351,7 @@ function createStatusIndicator() {
   el.textContent = "Logging: OFF";
   el.addEventListener("click", () => {
     loggingActive = !loggingActive;
-    browser.storage.local.set({
-      loggingActive
-    });
+    browser.storage.local.set({ loggingActive });
     updateStatusIndicator();
   });
   document.body.appendChild(el);
