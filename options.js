@@ -1,5 +1,17 @@
 const browser = window.browser || window.chrome;
 
+function getStorage(key) {
+  return new Promise((resolve, reject) => {
+    browser.storage.local.get(key, (result) => {
+      if (browser.runtime.lastError) {
+        reject(browser.runtime.lastError);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
 function exportDataToFile(data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: "application/json"
@@ -27,17 +39,14 @@ function onError(error) {
 }
 
 function loadOptions(item) {
-  if (item && item.username) {
-    document.querySelector("#id").value = item.username; // prefill input
+  if (item && item.userid) {
+    document.querySelector("#id").value = item.userid; // prefill input
   }
 }
 
 function restoreOptions() {
-  //browser.storage.local.get("idobject").then(loadOptions, onError);
-  getStorage(["idobject", "username", "loggingActive"])
-  .then((res) => {
-    loadOptions(res); // keeps your existing logic
-  })
+  getStorage(["username", "userid", "loggingActive"])
+  .then((res) => { loadOptions(res); })
   .catch(onError);
 }
 

@@ -77,10 +77,7 @@ function render(logs) {
   );
   // Keep only entries from latest ID
   logs = logs.filter(e => e.id === latestId);
-  logs.sort((a, b) =>
-    parseTime(a.timestamp) - parseTime(b.timestamp)
-  );
-
+  logs.sort( (a, b) => parseTime(a.timestamp) - parseTime(b.timestamp) );
   const xs = [];
   const mouseMove = [];
   const mouseClicks = [];
@@ -114,7 +111,6 @@ function render(logs) {
     // Alarm events
     alarmEvents.push( isAlarm(entry) ? 7 : null );
   }
-
   document.getElementById("chart").innerHTML = "";
   new uPlot(
     {
@@ -141,19 +137,16 @@ function render(logs) {
           values: () => [ "", "Key", "Mission", "Alarm" ]
         }
       ],
-
       series: [
         // X axis
         {},
-        {
-          label: "Mouse Motion",
+        { label: "Mouse Motion",
           stroke: "blue",
           width: 2,
           spanGaps: true,
           points: { show: false }
         },
-        {
-          label: "Mouse Clicks",
+        { label: "Mouse Clicks",
           stroke: "steelblue",
           fill: "rgba(70,130,180,0.45)",
           scale: "events",
@@ -166,14 +159,12 @@ function render(logs) {
           width: 0, scale: "events",
           points: { show: true, size:7, width:2 }
         },
-        {
-          label: "Missions",
+        { label: "Missions",
           stroke: "orange",
           width: 0, scale: "events",
           points: { show: true, size: 12, width:4 }
         },
-        {
-          label: "Alarm Events",
+        { label: "Alarms",
           stroke: "red",
           width: 0, scale: "events",
           points: { show: true, size: 12, width:4 }
@@ -198,7 +189,7 @@ function render(logs) {
               return;
             }
             tooltip.innerHTML = `
-              <b>Mission Event</b> (
+              <b>Mission</b> (
               <b>time:</b> ${mission.timestamp}, 
               <b>ingame:</b> ${mission.ingame_time} )<br>
               ${mission.message}`;
@@ -209,14 +200,7 @@ function render(logs) {
         ]
       }
     },
-    [
-      xs,
-      mouseMove,
-      mouseClicks,
-      keypresses,
-      missions,
-      alarmEvents
-    ],
+    [ xs, mouseMove, mouseClicks, keypresses, missions, alarmEvents ],
     document.getElementById("chart")
   );
 }

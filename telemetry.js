@@ -18,9 +18,7 @@ document.addEventListener("submit", (e) => {
   }
 });
 
-//old: getStorage("idobject").then(loadOptions).catch(onError);
-
-getStorage(["idobject", "username", "userid", "loggingActive"])
+getStorage(["username", "userid", "loggingActive"])
   .then((res) => {
     loadOptions(res); // keeps your existing logic
     if (res.loggingActive && res.username) {
@@ -58,13 +56,9 @@ function saveData(d) {
 }
 
 function loadOptions(item) {
-  if (item && item.idobject && item.idobject.id) {
-    username = item.idobject.id;
-  } else {
-    //const fallback = "default-" + crypto.randomUUID();
-    //username = fallback;
-    //browser.storage.local.set({ idobject: { id: fallback } });
-    //console.log("No idobject found, using fallback:", fallback);
+  if (item && item.username && item.userid) {
+    username = item.username;
+    userid = item.userid;
   }
 }
 
@@ -108,8 +102,8 @@ document.addEventListener("mousemove", (event) => {
 });
 setInterval(() => {
   if (!loggingActive) return;  // block logging until user starts game
-  if (mouseStats.clicks === 0 && mouseStats.moveDistance === 0) return;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, type: "mouse", 
+  //if (mouseStats.clicks === 0 && mouseStats.moveDistance === 0) return;
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, type: "mouse",
          clicks: mouseStats.clicks, moveDistance: Math.floor(mouseStats.moveDistance) });
   // reset after saving
   mouseStats.clicks = 0; mouseStats.moveDistance = 0;
@@ -141,7 +135,7 @@ function extractMission(root, type) {
     // cars
     const car_list = [];
     root.querySelectorAll(".patient_row .log_car_type").forEach((el) => {
-      car_list.push({ id: el.getAttribute("data-car"), 
+      car_list.push({ id: el.getAttribute("data-car"),
                       name: el.innerText, type: el.classList[1] || "" });
     });
     // forces
@@ -156,9 +150,9 @@ function extractMission(root, type) {
     const clock = document.querySelector("#clock")?.textContent || "";
     // mission type label
     const missiontype = root.querySelector(".type")?.textContent || "";
-    return {  timestamp: new Date().toTimeString().split(" ")[0], id: userid, 
-              type, missiontext, assigned_cars: car_list, 
-              requested_forces: forcesdict, ingame_time: clock, mission_type: missiontype };
+    return {  timestamp: new Date().toTimeString().split(" ")[0], id: userid,
+              /*type,*/ missiontext, cars: car_list,
+              requested_forces: forcesdict, */ ingame_time: clock, mission_type: missiontype };
   } catch (e) {
     console.warn("Failed to parse mission:", e);
     return null;
@@ -195,10 +189,7 @@ function startObserver() {
     setTimeout(startObserver, 500);
     return;
   }
-  missionObserver.observe(container, {
-    childList: true,
-    subtree: true
-  });
+  missionObserver.observe(container, { childList: true, subtree: true });
   console.log("Mission observer started");
 }
 startObserver();
@@ -219,10 +210,10 @@ function parseLogEntry(node) {
     const text = node.innerText || "";
     // timestamp (usually first column)
     const time = node.querySelector("span")?.textContent || "";
-    ////////  CASE 1: Sprechaufforderung  //////////////////////////
+    //////// Come in //////////////////////////////////////////
     if (text.includes("Sprechaufforderung")) {
       const carEl = node.querySelector("[data-car]");
-      return {  timestamp: new Date().toTimeString().split(" ")[0], 
+      return {  timestamp: new Date().toTimeString().split(" ")[0],
         id: userid, type: "call_request", time,
         caller: {
           carid: carEl?.getAttribute("data-car") || "",
@@ -230,10 +221,11 @@ function parseLogEntry(node) {
         }
       };
     }
-    ////////  CASE 2: verstanden. //////////////////////////////////
+    //////// Acknowledgement //////////////////////////////////
     if (text.toLowerCase().includes("verstanden")) {
       const message = node.querySelector("div")?.innerText || text;
-      return { id: userid, type: "acknowledgement", time, message };
+      return { timestamp: new Date().toTimeString().split(" ")[0],
+               id: userid, type: "acknowledgement", time, message };
     }
     return null;
   } catch (e) {
@@ -284,7 +276,7 @@ document.addEventListener("click", (e) => {
   // fallback-safe extraction
   const time = entry?.querySelector(".time")?.textContent?.trim() || null;
   const message = entry?.querySelector(".text")?.textContent?.trim() || "";
-  let action = "unknown";  
+  let action = "unknown";
   if (btn.closest(".logitem")) {
     const text = btn.textContent.trim().toLowerCase();
     if (text.includes("gegennehmen")) action = "phone_accept";
@@ -295,7 +287,7 @@ document.addEventListener("click", (e) => {
   if (btn.matches('button.dialog_ok[alarm="1"]')) {
     action = "mission_create_and_alarm";
   }
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], ingame_time: time, 
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], ingame_time: time,
     id: userid, action, message});
 });
 
@@ -305,7 +297,7 @@ document.addEventListener("click", (e) => {
    AGGREGATE MISSION OVERVIEW
 ------------------------------------------------------------------------------------------ */
 
-let missionDirty = true;
+//let missionDirty = true;
 let lastSnapshot = null;
 
 function buildMissionSnapshot() {
@@ -323,20 +315,20 @@ function buildMissionSnapshot() {
 
 setInterval(() => {
   if (!loggingActive) return;  // block logging until user starts game
-  if (!missionDirty) return;
-  missionDirty = false;
+  //if (!missionDirty) return;
+  //missionDirty = false;
   const snapshot = buildMissionSnapshot();
   // optional: skip if nothing changed
-  const changed = JSON.stringify(snapshot) !== JSON.stringify(lastSnapshot);
-  if (!changed) return;
-  lastSnapshot = snapshot;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, 
+  //const changed = JSON.stringify(snapshot) !== JSON.stringify(lastSnapshot);
+  //if (!changed) return;
+  //lastSnapshot = snapshot;
+  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid,
              type: "mission_overview", data: snapshot });
 }, 10000);  // every 10 secs
 
 
 /* ---------------------------------------------------------------------------------------
-   NICE DEBUGGING
+   ON-SCREEN STATUS
 ------------------------------------------------------------------------------------------ */
 
 function createStatusIndicator() {
@@ -344,15 +336,14 @@ function createStatusIndicator() {
   el.id = "logging-status-indicator";
   Object.assign(el.style, {
     position: "fixed",
-    top: "1px",
-    right: "2px",
+    top: "1px", right: "2px",
     zIndex: 9999,
     background: "rgba(0,0,0,0.7)",
     color: "#fff",
     padding: "2px 4px",
     borderRadius: "3px",
     fontSize: "8px",
-    cursor: "pointer",    // clickable    
+    cursor: "pointer",    // clickable
     fontFamily: "monospace"
   });
   el.textContent = "Logging: OFF";
