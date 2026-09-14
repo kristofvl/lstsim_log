@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leitstellen-Simulator: RettMobil Rangliste</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700;900&display=swap">
+  <link rel="stylesheet" href="leaderboard.css">
+  <script defer src="shared.js"></script>
+  <script defer src="leaderboard.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- TopNavBar -->
+    <header class="top-nav">
+      <div class="brand-group">
+        <span class="brand-logo">LstSim</span>
+        <span class="brand-badge">RettMobil Challenge</span>
+      </div>
+      <div class="header-right">
+        <!-- Action Buttons -->
+        <label class="action-btn import-btn" title="RettMobil Telemetrie-Log-Datei (*.json) importieren">
+          <input type="file" id="log-file-input" accept=".json" style="display: none;">
+          <span class="material-symbols-outlined" style="font-size: 18px;">upload_file</span>
+          <span>Importieren</span>
+        </label>
+
+        <button id="btn-export-all" class="action-btn export-btn" title="Alle Durchläufe und Aufnahmen als ZIP-Paket mit separaten Dateien exportieren">
+          <span class="material-symbols-outlined" style="font-size: 18px;">archive</span>
+          <span>Exportieren (ZIP)</span>
+        </button>
+
+        <button id="btn-delete-all" class="action-btn delete-btn" title="Alle Telemetriedaten und Ranglisten-Einträge unwiderruflich löschen">
+          <span class="material-symbols-outlined" style="font-size: 18px;">delete_sweep</span>
+          <span>Löschen</span>
+        </button>
+
+        <button id="btn-refresh-data" class="action-btn refresh-btn" title="Live-Daten aus LSTSim aktualisieren">
+          <span class="material-symbols-outlined" style="font-size: 18px;">sync</span>
+          <span>Aktualisieren</span>
+        </button>
+
+        <span class="live-pill" id="live-sync-indicator" title="Automatische Synchronisierung mit LSTSim aktiv">
+          <span class="live-dot"></span>
+          <span id="sync-text">Live Sync</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Sidebar Pane -->
+      <aside class="sidebar">
+        <!-- Event Info Tile -->
+        <div class="glass-pane card">
+          <div class="card-header">
+            <span class="material-symbols-outlined text-caution-orange">analytics</span>
+            <h3 class="card-title">Übersicht (RettMobil Metriken)</h3>
+          </div>
+          <div class="overview-list" id="overview-metrics">
+            <div class="metric-row">
+              <div class="metric-label">
+                <span class="material-symbols-outlined metric-icon">list_alt</span>
+                <span>Einsätze disponiert:</span>
+              </div>
+              <span class="metric-value font-mono" id="stat-total-missions">0 gesamt</span>
+            </div>
+            <div class="metric-row">
+              <div class="metric-label">
+                <span class="material-symbols-outlined metric-icon">timer</span>
+                <span>Ø Median-Reaktionszeit:</span>
+              </div>
+              <span class="metric-value font-mono" id="stat-avg-response">–</span>
+            </div>
+            <div class="metric-row">
+              <div class="metric-label">
+                <span class="material-symbols-outlined metric-icon">call</span>
+                <span>Ø Antwortquote:</span>
+              </div>
+              <span class="metric-value font-mono" id="stat-avg-answer-rate">–</span>
+            </div>
+            <div class="metric-row">
+              <div class="metric-label">
+                <span class="material-symbols-outlined metric-icon">backspace</span>
+                <span>Ø Backspace-Quote:</span>
+              </div>
+              <span class="metric-value font-mono" id="stat-avg-bp-rate">–</span>
+            </div>
+            <div class="top-dispatcher-box">
+              <div class="metric-label">
+                <span class="material-symbols-outlined metric-icon text-primary">emoji_events</span>
+                <span class="font-semibold">Top-Disponent:</span>
+              </div>
+              <span class="top-dispatcher-name font-mono" id="stat-top-dispatcher">–</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Last Run Recap Tile -->
+        <div class="glass-pane card border-left-accent">
+          <div class="card-header">
+            <span class="material-symbols-outlined text-primary">history</span>
+            <h3 class="card-title">Letzter Durchlauf</h3>
+          </div>
+          <div class="recap-content">
+            <div class="recap-field">
+              <div class="field-meta">
+                <span class="material-symbols-outlined text-muted" style="font-size: 16px;">person</span>
+                <span class="meta-label">Teilnehmer / ID</span>
+              </div>
+              <span class="dispatcher-id font-mono" id="recap-dispatcher">–</span>
+            </div>
+
+            <div class="recap-grid">
+              <div class="stat-pill">
+                <span class="pill-label">Punkte</span>
+                <span class="pill-value font-mono text-primary" id="recap-score">–</span>
+              </div>
+              <div class="stat-pill">
+                <span class="pill-label">Platzierung</span>
+                <span class="pill-value font-mono" id="recap-rank">–</span>
+              </div>
+            </div>
+
+            <div class="stat-pill efficiency-box">
+              <div class="efficiency-header">
+                <span class="pill-label">Antwortquote</span>
+                <span class="efficiency-pct font-mono text-success" id="recap-efficiency-text">–</span>
+              </div>
+              <div class="progress-track">
+                <div class="progress-bar" id="recap-efficiency-bar" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Leaderboard Table Pane -->
+      <section class="table-section">
+        <div class="glass-pane leaderboard-card">
+          <div class="table-header-bar">
+            <div class="header-title-wrap">
+              <span class="material-symbols-outlined text-muted">format_list_numbered</span>
+              <h2 class="table-heading">RettMobil Rangliste</h2>
+            </div>
+            <div class="table-actions">
+              <span class="data-source-badge font-mono" id="data-source-info">Echtzeit-Berechnung</span>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="leaderboard-table">
+              <thead>
+                <tr>
+                  <th class="col-rank">Rang</th>
+                  <th class="col-name">Teilnehmer / ID</th>
+                  <th class="col-missions">Einsätze</th>
+                  <th class="col-answer-rate">Antwortquote</th>
+                  <th class="col-rt">Median RT</th>
+                  <th class="col-bp">Backspace-Quote</th>
+                  <th class="col-score">Punkte</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body">
+                <!-- Dynamically populated via leaderboard.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

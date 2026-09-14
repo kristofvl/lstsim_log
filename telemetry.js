@@ -1,84 +1,99 @@
-const browser = window.browser || window.chrome;
+// Uses the `chrome` namespace: it supports callbacks in both Chrome and Firefox
+// (Firefox's `browser` namespace is promise-only).
 
-let loggingActive = false;
+let loggingActive = true;
+let onGamePage = false;
 let username = null;
-let userid = 0;
+let userid = null;
+let sessionId = null;
 
-// catch submit event to start the game:
-document.addEventListener("submit", (e) => {
-  const form = e.target;
-  const input = form.querySelector("input[name='playername'], #playername");
-  if (input && input.value.trim()) {
-    username = input.value.trim();
-    userid = userid || 0; userid = userid + 1;
-    console.log("User submitted:", username);
-    saveData({uname: username, uid: userid});
-    loggingActive = true; updateStatusIndicator();
-    browser.storage.local.set({ username, userid, loggingActive: true });
+const currentTime = () => new Date().toTimeString().split(" ")[0];
+const newSessionId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+chrome.storage.local.get(["username", "userid", "sessionId", "loggingActive"], (res) => {
+  if (chrome.runtime.lastError) return;
+  userid = res.userid || userid || 1;
+  username = res.username || username || `Disponent_${userid}`;
+  sessionId = res.sessionId || sessionId;
+  if (typeof res.loggingActive === "boolean") loggingActive = res.loggingActive;
+
+  if (!sessionId) {
+    sessionId = newSessionId();
+    chrome.storage.local.set({ username, userid, sessionId });
   }
+  updateStatusIndicator();
 });
 
-function getStorage(key) {
-  return new Promise((resolve, reject) => {
-    browser.storage.local.get(key, (result) => {
-      if (browser.runtime.lastError) {
-        reject(browser.runtime.lastError);
-      } else {
-        resolve(result);
-      }
-    });
-  });
+// Starting a new shift on the lstsim.de start page begins a new participant session.
+// The form posts and navigates away, so the session_start entry is sent immediately.
+document.addEventListener("submit", (e) => {
+  const input = e.target.querySelector?.("input[name='playername'], #playername");
+  if (!input) return;
+  userid = (parseInt(userid, 10) || 0) + 1;
+  username = input.value.trim() || `Disponent_${userid}`;
+  sessionId = newSessionId();
+  chrome.storage.local.set({ username, userid, sessionId });
+  if (loggingActive) {
+    sendEntries([stamp({ type: "session_start" })]);
+  }
+  updateStatusIndicator();
+});
+
+/* ---------------------------------------------------------------------------------------
+   GAME PAGE DETECTION
+------------------------------------------------------------------------------------------ */
+function detectGamePage() {
+  onGamePage = !!document.querySelector("#gradient, #logpanel");
+  if (onGamePage) {
+    startInteractionObserver();
+    updateStatusIndicator();
+  } else {
+    setTimeout(detectGamePage, 1000);
+  }
 }
 
-getStorage(["username", "userid", "loggingActive"])
-  .then((res) => {
-    loadOptions(res); // keeps existing username, userid, loggingActive
-    if (res.loggingActive && res.username) {
-      loggingActive = true; updateStatusIndicator();
-      username = res.username;
-      userid = res.userid;
-      console.log("Restored logging for user:", username, " (", userid, ")");
-      updateStatusIndicator();
-    }
-    if (document.getElementById("gradient") == null) {
-      loggingActive = false;
-      updateStatusIndicator();
-    } else { console.log("on game page: let's play"); }
-  }).catch(onError);
-
+/* ---------------------------------------------------------------------------------------
+   SAVE QUEUE (entries are appended to storage by the background worker)
+------------------------------------------------------------------------------------------ */
 const saveQueue = [];
 let flushTimer = null;
+
+function stamp(d) {
+  return { timestamp: currentTime(), id: userid, uname: username, sid: sessionId, ...d };
+}
+
+function scheduleFlush(delay) {
+  if (!flushTimer) {
+    flushTimer = setTimeout(flushSaveQueue, delay);
+  }
+}
+
 function flushSaveQueue() {
-  if (!loggingActive) return;  // block logging until user starts game
-  const batch = saveQueue.splice(0, saveQueue.length);
+  clearTimeout(flushTimer);
   flushTimer = null;
-  if (batch.length === 0) return;
-  browser.storage.local.get("logs").then((res) => {
-    const existing = res.logs || [];
-    browser.storage.local.set({
-      logs: existing.concat(batch)
+  if (saveQueue.length === 0) return;
+  sendEntries(saveQueue.splice(0, saveQueue.length));
+}
+
+function sendEntries(entries) {
+  try {
+    chrome.runtime.sendMessage({ type: "appendLogs", entries }, (res) => {
+      if (chrome.runtime.lastError || !res?.ok) {
+        // Background not reachable right now: keep the entries and retry
+        saveQueue.unshift(...entries);
+        scheduleFlush(2000);
+      }
     });
-  });
+  } catch (e) {
+    // Extension was reloaded or updated; this content script is orphaned
+  }
 }
 
 function saveData(d) {
-  if (!loggingActive) return;  // block logging until user starts game
-  console.log(d); // temporary fix
-  saveQueue.push(d);
-  if (!flushTimer) {
-    flushTimer = setTimeout(flushSaveQueue, 1000); // batch every 1s
-  }
+  if (!loggingActive || !onGamePage) return;
+  saveQueue.push(stamp(d));
+  scheduleFlush(500);
 }
-
-function loadOptions(item) {
-  if (item && item.username && item.userid) {
-    username = item.username;
-    userid = item.userid;
-  }
-}
-
-function onError(error) { console.error("Storage error:", error); }
-
 
 /* ---------------------------------------------------------------------------------------
    Aggregate Mouse and Key Statistics
@@ -89,12 +104,14 @@ let mouseStats = {
   lastX: null,
   lastY: null
 };
+
 document.addEventListener("mousedown", () => {
-  if (!loggingActive) return;  // block logging until user starts game
+  if (!loggingActive) return;
   mouseStats.clicks++;
 });
+
 document.addEventListener("mousemove", (event) => {
-  if (!loggingActive) return;  // block logging until user starts game
+  if (!loggingActive) return;
   if (mouseStats.lastX !== null) {
     const dx = event.clientX - mouseStats.lastX;
     const dy = event.clientY - mouseStats.lastY;
@@ -103,148 +120,114 @@ document.addEventListener("mousemove", (event) => {
   mouseStats.lastX = event.clientX;
   mouseStats.lastY = event.clientY;
 });
-setInterval(() => {
-  if (!loggingActive) return;  // block logging until user starts game
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid, type: "mouse",
-         clicks: mouseStats.clicks, moveDistance: Math.floor(mouseStats.moveDistance) });
-  // reset after saving
-  mouseStats.clicks = 0; mouseStats.moveDistance = 0;
-}, 5000);
+
+function flushMouseStats() {
+  if (mouseStats.clicks > 0 || mouseStats.moveDistance > 0) {
+    saveData({
+      type: "mouse",
+      clicks: mouseStats.clicks,
+      moveDistance: Math.floor(mouseStats.moveDistance)
+    });
+    mouseStats.clicks = 0;
+    mouseStats.moveDistance = 0;
+  }
+}
+
+setInterval(flushMouseStats, 3000);
 
 document.addEventListener("keydown", (e) => {
-  if (!loggingActive) return;  // block logging until user starts game
-  saveData({ id: userid, type: "key", key: e.key,
-    code: e.code, timestamp: new Date().toTimeString().split(" ")[0]
+  saveData({
+    type: "key",
+    key: e.key,
+    code: e.code
   });
 });
 
-
-/* ---------------------------------------------------------------------------------------
-   MISSION DETAILS OBSERVER
------------------------------------------------------------------------------------------- */
-
-const processedMissions = new WeakSet();
-
-function extractMission(root, type) {
-  if (!loggingActive) return;  // block logging until user starts game
-  try {
-    // mission text (more robust than style matching)
-    let missiontext = "";
-    const textCandidate = root.querySelector("div");
-    if (textCandidate) {
-      missiontext = textCandidate.innerText || "";
-    }
-    // cars
-    const car_list = [];
-    root.querySelectorAll(".patient_row .log_car_type").forEach((el) => {
-      car_list.push({ id: el.getAttribute("data-car"),
-                      name: el.innerText, type: el.classList[1] || "" });
-    });
-    // forces
-    const forcesdict = { RTW: 0, KTW: 0, NEF: 0 };
-    root.querySelectorAll(".patients .required_forces").forEach((el) => {
-      const txt = el.innerText;
-      if (txt.includes("NEF")) forcesdict.NEF++;
-      if (txt.includes("RTW")) forcesdict.RTW++;
-      if (txt.includes("KTW")) forcesdict.KTW++;
-    });
-    // clock
-    const clock = document.querySelector("#clock")?.textContent || "";
-    // mission type label
-    const missiontype = root.querySelector(".type")?.textContent || "";
-    return {  timestamp: new Date().toTimeString().split(" ")[0], id: userid,
-              /*type,*/ missiontext, cars: car_list, /*
-              requested_forces: forcesdict, */ ingame_time: clock, mission_type: missiontype };
-  } catch (e) {
-    console.warn("Failed to parse mission:", e);
-    return null;
-  }
-}
-
-const missionObserver = new MutationObserver((mutations) => {
-  if (!loggingActive) return;  // block logging until user starts game
-  for (const mutation of mutations) {
-    for (const node of mutation.addedNodes) {
-      if (node.nodeType !== 1) continue;
-      // find mission nodes inside this change
-      const missionNodes = node.matches?.("#missiontab_0 > div, #missiontab_1 > div, #missiontab_2 > div")
-        ? [node]
-        : node.querySelectorAll?.("#missiontab_0 > div, #missiontab_1 > div, #missiontab_2 > div") || [];
-      for (const missionNode of missionNodes) {
-        if (processedMissions.has(missionNode)) continue;
-        processedMissions.add(missionNode);
-        // detect type based on parent tab
-        let type = null;
-        if (missionNode.closest("#missiontab_0")) type = "notfall";
-        else if (missionNode.closest("#missiontab_1")) type = "krankentransport";
-        else if (missionNode.closest("#missiontab_2")) type = "vorgeplant";
-        if (!type) continue;
-        const data = extractMission(missionNode, type);
-        if (data) saveData(data);
-      }
-    }
-  }
+// Don't lose the last queued entries when the page is closed or reloaded
+window.addEventListener("pagehide", () => {
+  flushMouseStats();
+  flushSaveQueue();
 });
-function startObserver() {
-  const container = document.querySelector("#missionlist");
-  if (!container) {
-    setTimeout(startObserver, 500);
-    return;
-  }
-  missionObserver.observe(container, { childList: true, subtree: true });
-  console.log("Mission observer started");
-}
-startObserver();
-
 
 /* ---------------------------------------------------------------------------------------
-   INTERACTION OBSERVER
+   LOGPANEL & CALL OBSERVER
 ------------------------------------------------------------------------------------------ */
-
 const processedLogs = new WeakSet();
 
 function parseLogEntry(node) {
-  if (!loggingActive) return;  // block logging until user starts game
   try {
-    // avoid re-processing
     if (processedLogs.has(node)) return null;
     processedLogs.add(node);
-    const text = node.innerText || "";
-    // timestamp (usually first column)
-    const time = node.querySelector("span")?.textContent || "";
-    //////// Come in //////////////////////////////////////////
+    // Message text only, without button labels such as "Anrufer weiterleiten"
+    const text = (node.querySelector(".text")?.textContent || node.innerText || "").replace(/\s+/g, " ").trim();
+    const time = node.querySelector(".time, span")?.textContent?.trim() || "";
+    const clock = document.querySelector("#clock")?.textContent?.trim() || time;
+    const lower = text.toLowerCase();
+
+    if (node.closest("#phonepanel")) {
+      // Phone rings: emergency call or colleague handing over a mission.
+      // `time` is the log item's in-game time; the accept click on the same item carries it too.
+      if (lower.startsWith("neuer telefonanruf") || lower.startsWith("kollege von tisch")) {
+        return {
+          ingame_time: clock,
+          action: "unknown",
+          type: "call_incoming",
+          time,
+          message: text
+        };
+      }
+      // Caller's statement, offered with a "Neuen Einsatz erstellen" button
+      if (node.querySelector("button[action='create']")) {
+        return {
+          ingame_time: clock,
+          action: "unknown",
+          type: "call_message",
+          time,
+          message: text
+        };
+      }
+      return null;
+    }
+
+    // 1. Radio Sprechaufforderung
     if (text.includes("Sprechaufforderung")) {
       const carEl = node.querySelector("[data-car]");
-      return {  timestamp: new Date().toTimeString().split(" ")[0],
-        id: userid, type: "call_request", time,
+      return {
+        ingame_time: clock,
+        type: "call_request",
+        time,
+        message: text,
         caller: {
           carid: carEl?.getAttribute("data-car") || "",
           carname: carEl?.textContent || ""
         }
       };
     }
-    //////// Acknowledgement //////////////////////////////////
-    if (text.toLowerCase().includes("verstanden")) {
-      const message = node.querySelector("div")?.innerText || text;
-      return { timestamp: new Date().toTimeString().split(" ")[0],
-               id: userid, type: "acknowledgement", time, message };
+
+    // 2. Radio Acknowledgement / Status
+    if (lower.includes("verstanden") || lower.includes("status")) {
+      return {
+        ingame_time: clock,
+        type: "acknowledgement",
+        time,
+        message: text
+      };
     }
+
     return null;
   } catch (e) {
-    console.warn("Failed to parse log entry:", e);
     return null;
   }
 }
 
 const interactionObserver = new MutationObserver((mutations) => {
-  if (!loggingActive) return;  // block logging until user starts game
+  if (!loggingActive) return;
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
-      if (node.nodeType !== 1) continue; // only elements
-      // direct match OR nested entries
-      const entries = node.matches?.("div")
+      if (node.nodeType !== 1) continue;
+      const entries = node.matches(".logitem, .logentry, div")
         ? [node]
-        : node.querySelectorAll?.("div") || [];
+        : node.querySelectorAll(".logitem, .logentry, div");
       for (const entry of entries) {
         const data = parseLogEntry(entry);
         if (data) saveData(data);
@@ -252,128 +235,111 @@ const interactionObserver = new MutationObserver((mutations) => {
     }
   }
 });
-function startInteractionObserver() {
-  const container = document.querySelector("#logpanel .logcontainer");
-  if (!container) {
-    setTimeout(startInteractionObserver, 500);
-    return;
-  }
-  interactionObserver.observe(container, {
-    childList: true,
-    subtree: true
-  });
-  console.log("Interaction observer started");
-}
-startInteractionObserver();
 
+let observerStarted = false;
+
+function observeWhenPresent(selector) {
+  const container = document.querySelector(selector);
+  if (container) {
+    interactionObserver.observe(container, { childList: true, subtree: true });
+  } else {
+    setTimeout(() => observeWhenPresent(selector), 500);
+  }
+}
+
+// Radio messages appear in #logpanel, phone calls in #phonepanel
+function startInteractionObserver() {
+  if (observerStarted) return;
+  observerStarted = true;
+  observeWhenPresent("#logpanel .logcontainer");
+  observeWhenPresent("#phonepanel .logcontainer");
+}
 
 /* ---------------------------------------------------------------------------------------
-   PARSE SINGLE DISPO ENTRY / KARTE ZEIGEN
+   DISPATCH & BUTTON CLICKS OBSERVER
 ------------------------------------------------------------------------------------------ */
-// User clicked "Einen Neuen Einsatz ..."
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest("button");
+  const btn = e.target.closest("button, .btn, a.button, input[type='button'], input[type='submit']");
   if (!btn) return;
-  const entry = btn.closest(".logitem");
-  // fallback-safe extraction
-  const time = entry?.querySelector(".time")?.textContent?.trim() || null;
-  const message = entry?.querySelector(".text")?.textContent?.trim() || "";
+
+  const entry = btn.closest(".logitem") || btn.closest(".dialog") || btn.closest(".mission") || btn.closest("form");
+  const time = entry?.querySelector(".time, .clock")?.textContent?.trim() || document.querySelector("#clock")?.textContent?.trim() || null;
+  const message = entry?.querySelector(".text, p, div")?.textContent?.trim() || "";
   let action = "unknown";
-  if (btn.closest(".logitem")) {
-    const text = btn.textContent.trim().toLowerCase();
-    if (text.includes("gegennehmen")) action = "phone_accept";
-    else if (text.includes("Einsatz ers")) action = "dispo_create";
-    else if (text.includes("egen")) action = "hangup";
-    else if (text.includes("Karte")) action = "map_view";
-  }
-  if (btn.matches('button.dialog_ok[alarm="1"]')) {
+
+  const text = (btn.textContent || btn.value || "").trim().toLowerCase();
+  const buttonAction = btn.getAttribute("action");
+  if (text.includes("gegennehmen") || text.includes("annehmen") || text.includes("ja, bitte")) action = "phone_accept";
+  else if (buttonAction === "create" || text.includes("einsatz ers") || text.includes("erstellen")) action = "dispo_create";
+  else if (buttonAction === "hangup" || text.includes("auflegen")) action = "hangup";
+  else if (buttonAction === "forward") action = "call_forward";
+  else if (buttonAction === "locate" || text.includes("karte")) action = "map_view";
+
+  if (btn.matches('button.dialog_ok[alarm="1"]') || text.includes("alarm") || text.includes("disponieren")) {
     action = "mission_create_and_alarm";
   }
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], ingame_time: time,
-    id: userid, action, message});
+
+  if (action !== "unknown") {
+    saveData({
+      ingame_time: time,
+      action,
+      message: message || text
+    });
+  }
 });
 
-
-
 /* ---------------------------------------------------------------------------------------
-   AGGREGATE MISSION OVERVIEW
+   ON-SCREEN STATUS INDICATOR
 ------------------------------------------------------------------------------------------ */
-
-//let missionDirty = true;
-let lastSnapshot = null;
-
-function buildMissionSnapshot() {
-  const rtw = {};
-  document.querySelectorAll('#missiontab_0_title > div > span')
-    .forEach(div => rtw[div.title] = div.textContent);
-  const ktw = {};
-  document.querySelectorAll('#missiontab_1_title > div > span')
-    .forEach(div => ktw[div.title] = div.textContent);
-  const vor = {};
-  document.querySelectorAll('#missiontab_2_title > div > span')
-    .forEach(div => vor[div.title] = div.textContent);
-  return { einsaetze: rtw, krankentransport: ktw, vorbestellungen: vor };
-}
-
-setInterval(() => {
-  if (!loggingActive) return;  // block logging until user starts game
-  //if (!missionDirty) return;
-  //missionDirty = false;
-  const snapshot = buildMissionSnapshot();
-  // optional: skip if nothing changed
-  //const changed = JSON.stringify(snapshot) !== JSON.stringify(lastSnapshot);
-  //if (!changed) return;
-  //lastSnapshot = snapshot;
-  saveData({ timestamp: new Date().toTimeString().split(" ")[0], id: userid,
-             type: "mission_overview", data: snapshot });
-}, 10000);  // every 10 secs
-
-
-/* ---------------------------------------------------------------------------------------
-   ON-SCREEN STATUS
------------------------------------------------------------------------------------------- */
-
 function createStatusIndicator() {
+  if (document.getElementById("logging-status-indicator") || !document.body) return;
   const el = document.createElement("div");
   el.id = "logging-status-indicator";
   Object.assign(el.style, {
     position: "fixed",
-    top: "1px", right: "2px",
-    zIndex: 9999,
-    background: "rgba(0,0,0,0.7)",
+    top: "2px",
+    right: "4px",
+    zIndex: 99999,
     color: "#fff",
-    padding: "2px 4px",
-    borderRadius: "3px",
-    fontSize: "8px",
-    cursor: "pointer",    // clickable
-    fontFamily: "monospace"
+    padding: "3px 6px",
+    borderRadius: "4px",
+    fontSize: "10px",
+    cursor: "pointer",
+    fontFamily: "monospace",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.3)"
   });
-  el.textContent = "Logging: OFF";
   el.addEventListener("click", () => {
     loggingActive = !loggingActive;
-    browser.storage.local.set({ loggingActive });
+    chrome.storage.local.set({ loggingActive });
     updateStatusIndicator();
   });
   document.body.appendChild(el);
 }
 
-createStatusIndicator();
-
 function updateStatusIndicator() {
+  createStatusIndicator();
   const el = document.getElementById("logging-status-indicator");
   if (!el) return;
-  el.textContent = loggingActive
-    ? `Logging: ON (${username || "unknown"},${userid || "00"})`
-    : "Logging: OFF";
-  el.style.background = loggingActive ? "rgba(0,128,0,0.8)" : "rgba(128,0,0,0.8)";
+  if (!loggingActive) {
+    el.textContent = "Telemetry: PAUSED";
+    el.style.background = "rgba(180,0,0,0.85)";
+  } else if (!onGamePage) {
+    el.textContent = "Telemetry: STANDBY (wartet auf Spielstart)";
+    el.style.background = "rgba(90,90,90,0.85)";
+  } else {
+    el.textContent = `Telemetry: ON (${username || "Disponent"}, #${userid || 1})`;
+    el.style.background = "rgba(0,128,0,0.85)";
+  }
 }
-updateStatusIndicator();
 
-browser.storage.onChanged.addListener((changes, area) => {
+chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.loggingActive) { loggingActive = changes.loggingActive.newValue; }
-  if (changes.username) { username = changes.username.newValue; }
-  updateStatusIndicator();
+  if (changes.loggingActive) loggingActive = changes.loggingActive.newValue !== false;
+  if (changes.username) username = changes.username.newValue;
+  if (changes.userid) userid = changes.userid.newValue;
+  if (changes.sessionId) sessionId = changes.sessionId.newValue;
+  if (changes.loggingActive || changes.username || changes.userid) updateStatusIndicator();
 });
 
-
+updateStatusIndicator();
+detectGamePage();
