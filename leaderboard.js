@@ -381,6 +381,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       importedLogs = importedLogs.filter((entry) => entry && typeof entry === 'object');
 
+      // Legacy entries carry only `id`: name them after the file, and give each file its own
+      // session so files that reuse the same id aren't merged
+      const fileName = file.name.replace(/\.json$/i, '').trim() || file.name;
+      importedLogs = importedLogs.map((entry) => (
+        entry.sid || entry.uname || entry.username
+          ? entry
+          : { ...entry, uname: fileName, sid: `legacy:${fileName}:${entry.id ?? ''}` }
+      ));
+
       if (!hasStorage) {
         render(processRettMobilLogs(importedLogs));
         return;
