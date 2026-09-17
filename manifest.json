@@ -1,29 +1,38 @@
-{ 
+{
   "manifest_version": 3,
-  "name": "LSTSIM Telemetry",
-  "description": "Collect data from lstsim.de",
+  "name": "LSTSIM Telemetry & Leaderboard",
+  "description": "Leitstellen-Simulator: Optimierte Übersicht (Messe-Modus) & Telemetrie",
   "version": "1.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "LstSim - Messe Challenge 2026 Rangliste",
+    "default_icon": {
+      "16": "imgs/icon16.png",
+      "48": "imgs/icon48.png",
+      "128": "imgs/icon128.png"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["*://lstsim.de/*"],
-      "js": ["telemetry.js"]
+      "matches": ["*://*.lstsim.de/*"],
+      "js": ["telemetry.js", "telemetry_legacy.js"]
     }
   ],
   "options_ui": {
-    "page": "options.html",
-    "browser_style": true
+    "page": "options.html"
   },
   "icons": {
     "16": "imgs/icon16.png",
     "48": "imgs/icon48.png",
-    "128":"imgs/icon128.png"
+    "128": "imgs/icon128.png"
   },
   "permissions": [
-  "storage",
-  "activeTab",
-  "tabs"
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
-    "*://lstsim.de/*"
+    "*://*.lstsim.de/*"
   ]
 }

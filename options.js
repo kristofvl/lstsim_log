@@ -1,54 +1,90 @@
-const browser = window.browser || window.chrome;
+// Requires shared.js (createZipArchive, downloadBlob, buildSessionZipFiles, sendLogCommand)
 
-function getStorage(key) {
-  return new Promise((resolve, reject) => {
-    browser.storage.local.get(key, (result) => {
-      if (browser.runtime.lastError) {
-        reject(browser.runtime.lastError);
-      } else {
-        resolve(result);
-      }
-    });
-  });
-}
-
-function exportDataToFile(data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json"
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `lstsim_telemetry_${Date.now()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-document.getElementById("export-clear").addEventListener("click", () => {
-  browser.storage.local.get("logs").then((res) => {
-    const data = res.logs || [];
-    exportDataToFile(data);
-    browser.storage.local.set({ logs: [] });
-  });
-});
-
-function onError(error) {
-  console.log(error)
-}
-
-function loadOptions(item) {
-  if (item && item.userid) {
-    document.querySelector("#id").value = item.userid; // prefill input
+function showStatus(msg) {
+  const el = document.getElementById('status');
+  if (el) {
+    el.textContent = msg;
+    setTimeout(() => { el.textContent = ''; }, 3500);
   }
 }
 
-function restoreOptions() {
-  getStorage(["username", "userid", "loggingActive"])
-  .then((res) => { loadOptions(res); })
-  .catch(onError);
+function performBulkZipExport(andClear = false) {
+  chrome.storage.local.get(['logs', 'legacyLogs'], async (res) => {
+    const logs = res.logs || [];
+    const legacyLogs = res.legacyLogs || [];
+    if (logs.length === 0 && legacyLogs.length === 0) {
+      alert('Keine Telemetriedaten vorhanden.');
+      return;
+    }
+
+    const zipFiles = buildSessionZipFiles(logs, 'lstsim');
+    if (legacyLogs.length > 0) {
+      zipFiles.push({ name: 'lstsim_telemetry_legacy_format.json', content: JSON.stringify(legacyLogs, null, 2) });
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadBlob(createZipArchive(zipFiles), `lstsim_telemetry_bulk_${timestamp}.zip`);
+
+    if (!andClear) {
+      showStatus('Bulk-Export abgeschlossen.');
+      return;
+    }
+    try {
+      // Only remove the exported entries; events recorded in the meantime are kept
+      await Promise.all([
+        sendLogCommand({ type: 'removeLogs', key: 'logs', count: logs.length }),
+        sendLogCommand({ type: 'removeLogs', key: 'legacyLogs', count: legacyLogs.length })
+      ]);
+      showStatus('Daten exportiert und erfolgreich gelöscht.');
+    } catch (err) {
+      showStatus(`Löschen fehlgeschlagen: ${err.message}`);
+    }
+  });
 }
 
-document.addEventListener('DOMContentLoaded', restoreOptions);
+// Same file name and layout as the original "Export + Clear" (one JSON array), without clearing
+function performLegacyExport() {
+  chrome.storage.local.get('legacyLogs', (res) => {
+    const legacyLogs = res.legacyLogs || [];
+    if (legacyLogs.length === 0) {
+      alert('Keine Daten im alten Format vorhanden.');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(legacyLogs, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, `lstsim_telemetry_${Date.now()}.json`);
+    showStatus('Legacy-Export abgeschlossen.');
+  });
+}
 
+document.getElementById('btn-save').addEventListener('click', () => {
+  const idValue = document.getElementById('id').value.trim();
+  const userid = parseInt(idValue, 10) || idValue || 1;
+  const username = document.getElementById('username').value.trim() || `Disponent_${userid}`;
+
+  chrome.storage.local.get(['userid', 'username'], (prev) => {
+    const update = { userid, username };
+    // A different participant gets a new session so their data isn't merged with the previous run
+    if (String(prev.userid) !== String(userid) || prev.username !== username) {
+      update.sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+    chrome.storage.local.set(update, () => {
+      showStatus('Einstellungen gespeichert.');
+    });
+  });
+});
+
+document.getElementById('export-bulk').addEventListener('click', () => {
+  performBulkZipExport(false);
+});
+
+document.getElementById('export-legacy').addEventListener('click', performLegacyExport);
+
+document.getElementById('export-clear').addEventListener('click', () => {
+  if (confirm('Möchtest du alle Telemetriedaten exportieren und den Speicher anschließend leeren?')) {
+    performBulkZipExport(true);
+  }
+});
+
+chrome.storage.local.get(['username', 'userid'], (res) => {
+  if (res.userid) document.getElementById('id').value = res.userid;
+  if (res.username) document.getElementById('username').value = res.username;
+});
