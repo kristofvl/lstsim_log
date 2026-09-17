@@ -359,36 +359,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // File import for real JSON logs
+  // File import for real JSON logs (several files at once)
   const fileInput = document.getElementById('log-file-input');
   if (fileInput) {
     fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      // Reset so the same file can be picked again
+      const files = [...e.target.files];
+      // Reset so the same files can be picked again
       e.target.value = '';
-      if (!file) return;
+      if (files.length === 0) return;
 
-      let importedLogs;
-      try {
-        importedLogs = JSON.parse(await file.text());
-      } catch (err) {
-        alert('Die Datei enthält kein gültiges JSON.');
-        return;
-      }
-      if (!Array.isArray(importedLogs)) {
-        alert('Die Datei enthält keine Telemetrie-Liste (JSON-Array erwartet).');
-        return;
-      }
-      importedLogs = importedLogs.filter((entry) => entry && typeof entry === 'object');
+      const importedLogs = [];
+      const failed = [];
+      for (const file of files) {
+        let entries;
+        try {
+          entries = JSON.parse(await file.text());
+        } catch (err) {
+          failed.push(`${file.name}: kein gültiges JSON`);
+          continue;
+        }
+        if (!Array.isArray(entries)) {
+          failed.push(`${file.name}: keine Telemetrie-Liste (JSON-Array erwartet)`);
+          continue;
+        }
 
-      // Legacy entries carry only `id`: name them after the file, and give each file its own
-      // session so files that reuse the same id aren't merged
-      const fileName = file.name.replace(/\.json$/i, '').trim() || file.name;
-      importedLogs = importedLogs.map((entry) => (
-        entry.sid || entry.uname || entry.username
-          ? entry
-          : { ...entry, uname: fileName, sid: `legacy:${fileName}:${entry.id ?? ''}` }
-      ));
+        // Legacy entries carry only `id`: name them after the file, and give each file its own
+        // session so files that reuse the same id aren't merged
+        const fileName = file.name.replace(/\.json$/i, '').trim() || file.name;
+        entries
+          .filter((entry) => entry && typeof entry === 'object')
+          .forEach((entry) => importedLogs.push(
+            entry.sid || entry.uname || entry.username
+              ? entry
+              : { ...entry, uname: fileName, sid: `legacy:${fileName}:${entry.id ?? ''}` }
+          ));
+      }
+
+      if (failed.length > 0) {
+        alert(`${failed.length} von ${files.length} Datei(en) nicht importiert:\n${failed.join('\n')}`);
+      }
+      if (importedLogs.length === 0) return;
 
       if (!hasStorage) {
         render(processRettMobilLogs(importedLogs));
